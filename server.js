@@ -1,15 +1,31 @@
-// server.js
+// server.js - HR Leave Management System with Supabase
 const express = require('express');
 const bodyParser = require('body-parser');
 const path = require('path');
-const sqlite3 = require('sqlite3').verbose();
 const session = require('express-session');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const fs = require('fs');
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3001; // Changed port to 3001
+
+// Supabase configuration
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY;
+
+// Check if Supabase credentials are provided
+if (!supabaseUrl || !supabaseKey) {
+    console.error('❌ Missing Supabase credentials!');
+    console.log('📋 Please create a .env file with:');
+    console.log('   SUPABASE_URL=https://your-project-id.supabase.co');
+    console.log('   SUPABASE_ANON_KEY=your-anon-key-here');
+    process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Configure multer for file uploads
 const upload = multer({
@@ -24,136 +40,158 @@ const upload = multer({
     }
 });
 
-// Database setup
-const db = new sqlite3.Database('./hr_system.db', (err) => {
-    if (err) {
-        console.error('Error opening database:', err);
-    } else {
-        console.log('Connected to SQLite database');
-        initializeDatabase();
-    }
-});
-
-// Initialize database tables
-function initializeDatabase() {
-    // Create employees table
-    db.run(`CREATE TABLE IF NOT EXISTS employees (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    department TEXT,
-    total_leaves INTEGER NOT NULL,
-    available_leaves INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-    // Create leaves table
-    db.run(`CREATE TABLE IF NOT EXISTS leaves (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    employee_id INTEGER NOT NULL,
-    start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL,
-    days INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    status TEXT DEFAULT 'approved',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (employee_id) REFERENCES employees (id)
-  )`);
-
-    // Insert sample data if tables are empty
-    db.get("SELECT COUNT(*) as count FROM employees", (err, row) => {
-        if (!err && row.count === 0) {
-            insertSampleData();
-        }
-    });
-}
-
-function insertSampleData() {
-    console.log('Inserting sample data...');
-
-    const sampleEmployees = [
-        { name: "John Doe", department: "IT", total_leaves: 25, available_leaves: 20 },
-        { name: "Jane Smith", department: "HR", total_leaves: 30, available_leaves: 22 },
-        { name: "Mike Johnson", department: "Finance", total_leaves: 25, available_leaves: 25 },
-        { name: "Sarah Wilson", department: "Marketing", total_leaves: 28, available_leaves: 15 }
-    ];
-
-    sampleEmployees.forEach(emp => {
-        db.run("INSERT INTO employees (name, department, total_leaves, available_leaves) VALUES (?, ?, ?, ?)",
-            [emp.name, emp.department, emp.total_leaves, emp.available_leaves]);
-    });
-
-    // Sample leaves
-    const sampleLeaves = [
-        { employee_id: 1, start_date: "2024-01-15", end_date: "2024-01-17", days: 3, reason: "Personal" },
-        { employee_id: 1, start_date: "2024-02-20", end_date: "2024-02-21", days: 2, reason: "Medical" },
-        { employee_id: 2, start_date: "2024-01-10", end_date: "2024-01-14", days: 5, reason: "Vacation" },
-        { employee_id: 2, start_date: "2024-03-05", end_date: "2024-03-07", days: 3, reason: "Personal" },
-        { employee_id: 4, start_date: "2024-02-01", end_date: "2024-02-10", days: 10, reason: "Vacation" },
-        { employee_id: 4, start_date: "2024-03-15", end_date: "2024-03-17", days: 3, reason: "Medical" }
-    ];
-
-    sampleLeaves.forEach(leave => {
-        db.run("INSERT INTO leaves (employee_id, start_date, end_date, days, reason) VALUES (?, ?, ?, ?, ?)",
-            [leave.employee_id, leave.start_date, leave.end_date, leave.days, leave.reason]);
-    });
-
-    console.log('Sample data inserted');
-}
-
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Session configuration
+// Middleware to force clear any existing sessions/cookies
+app.use((req, res, next) => {
+    // Force clear any session cookies
+    if (req.headers.cookie) {
+        console.log('🍪 Found existing cookies, clearing them...');
+        res.clearCookie('connect.sid');
+        res.clearCookie('hr-system-session');
+        // Clear any other session cookies
+        const cookies = req.headers.cookie.split(';');
+        cookies.forEach(cookie => {
+            const cookieName = cookie.split('=')[0].trim();
+            res.clearCookie(cookieName);
+        });
+    }
+    next();
+});
+
+// Session configuration - with different session name
 app.use(session({
-    secret: 'hr-system-secret-key-2024',
+    name: 'hr-system-session', // Custom session name
+    secret: 'hr-system-secret-key-2024-new',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+    cookie: {
+        secure: false,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        httpOnly: true
+    }
 }));
 
 // Authentication middleware
 function requireAuth(req, res, next) {
-    if (req.session.authenticated) {
+    console.log('🔐 Auth check - Session authenticated:', req.session.authenticated);
+    if (req.session.authenticated === true) {
         return next();
     }
     if (req.xhr || req.headers.accept.indexOf('json') > -1) {
         return res.status(401).json({ error: 'Authentication required' });
     }
+    console.log('🚫 Not authenticated, redirecting to login');
     res.redirect('/login');
 }
 
-// Routes
+// ==================== ROUTES ====================
+
+// Root route - FORCE redirect to login with cache busting
 app.get('/', (req, res) => {
-    if (req.session.authenticated) {
-        return res.redirect('/dashboard');
-    }
-    res.redirect('/login');
+    console.log('🏠 === ROOT PATH ACCESSED === 🏠');
+    console.log('🕐 Time:', new Date().toISOString());
+    console.log('👤 User-Agent:', req.headers['user-agent']);
+    console.log('🔗 Referer:', req.headers.referer);
+    console.log('🆔 Session ID:', req.sessionID);
+    console.log('🔐 Session authenticated:', req.session.authenticated);
+    console.log('📄 Full session:', JSON.stringify(req.session, null, 2));
+    console.log('➡️  Forcing redirect to /login');
+
+    // Destroy any existing session
+    req.session.destroy((err) => {
+        if (err) console.log('❌ Session destroy error:', err);
+
+        // Force redirect with aggressive cache busting
+        res.writeHead(302, {
+            'Location': '/login',
+            'Cache-Control': 'no-cache, no-store, must-revalidate, private',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Clear-Site-Data': '"cache", "cookies", "storage"'
+        });
+        res.end();
+    });
 });
 
+// Login page
 app.get('/login', (req, res) => {
+    console.log('=== LOGIN PATH ACCESSED ===');
+    console.log('Session authenticated:', req.session.authenticated);
+
     if (req.session.authenticated) {
         return res.redirect('/dashboard');
     }
     res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
+// Dashboard
 app.get('/dashboard', requireAuth, (req, res) => {
+    console.log('=== DASHBOARD PATH ACCESSED ===');
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Debug routes
+app.get('/clear-session', (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            res.status(500).send('Error clearing session');
+        } else {
+            res.send('Session cleared. <a href="/">Go to home</a>');
+        }
+    });
+});
+
+app.get('/debug-session', (req, res) => {
+    res.json({
+        sessionID: req.sessionID,
+        authenticated: req.session.authenticated,
+        session: req.session
+    });
 });
 
 // ==================== AUTHENTICATION ROUTES ====================
 
 // Login endpoint
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
 
-    if (username === 'Reyam' && password === 'SugarHamburger') {
+    try {
+        // Check user credentials in Supabase
+        const { data, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', username)
+            .eq('password', password) // In production, use hashed passwords
+            .single();
+
+        if (error || !data) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid username or password'
+            });
+        }
+
+        // Set session
         req.session.authenticated = true;
-        res.json({ success: true, message: 'Login successful' });
-    } else {
-        res.status(401).json({ success: false, message: 'Invalid username or password' });
+        req.session.userId = data.id;
+        req.session.username = data.username;
+
+        res.json({
+            success: true,
+            message: 'Login successful',
+            user: { id: data.id, username: data.username, role: data.role }
+        });
+
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Login failed. Please try again.'
+        });
     }
 });
 
@@ -170,104 +208,118 @@ app.post('/api/logout', (req, res) => {
 
 // Check authentication status
 app.get('/api/auth/status', (req, res) => {
-    res.json({ authenticated: !!req.session.authenticated });
+    res.json({
+        authenticated: !!req.session.authenticated,
+        username: req.session.username
+    });
 });
 
 // ==================== EMPLOYEE ROUTES ====================
 
-// Get all employees with their leave summary
-app.get('/api/employees', requireAuth, (req, res) => {
-    const query = `
-    SELECT 
-      e.id,
-      e.name,
-      e.department,
-      e.total_leaves,
-      e.available_leaves,
-      e.created_at,
-      (e.total_leaves - e.available_leaves) as used_leaves,
-      COUNT(l.id) as total_leave_requests
-    FROM employees e
-    LEFT JOIN leaves l ON e.id = l.employee_id
-    GROUP BY e.id, e.name, e.department, e.total_leaves, e.available_leaves, e.created_at
-    ORDER BY e.name
-  `;
+// Get all employees with leave summary
+app.get('/api/employees', requireAuth, async (req, res) => {
+    try {
+        const { data: employees, error } = await supabase
+            .from('employees')
+            .select(`
+        id,
+        name,
+        department,
+        total_leaves,
+        available_leaves,
+        created_at,
+        leaves:leaves(id)
+      `)
+            .order('name');
 
-    db.all(query, (err, rows) => {
-        if (err) {
-            console.error('Database error:', err);
-            res.status(500).json({ error: err.message });
-        } else {
-            res.json(rows);
-        }
-    });
+        if (error) throw error;
+
+        // Calculate used leaves and total leave requests
+        const employeesWithStats = employees.map(emp => ({
+            ...emp,
+            used_leaves: emp.total_leaves - emp.available_leaves,
+            total_leave_requests: emp.leaves ? emp.leaves.length : 0
+        }));
+
+        res.json(employeesWithStats);
+    } catch (error) {
+        console.error('Error fetching employees:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-// Get employee by ID with detailed leave history
-app.get('/api/employees/:id', requireAuth, (req, res) => {
+// Get employee by ID with leave history
+app.get('/api/employees/:id', requireAuth, async (req, res) => {
     const employeeId = req.params.id;
 
-    // Get employee details
-    db.get("SELECT * FROM employees WHERE id = ?", [employeeId], (err, employee) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        // Get employee details
+        const { data: employee, error: empError } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('id', employeeId)
+            .single();
+
+        if (empError) throw empError;
         if (!employee) {
             return res.status(404).json({ error: 'Employee not found' });
         }
 
         // Get employee's leave history
-        db.all(`
-      SELECT * FROM leaves 
-      WHERE employee_id = ? 
-      ORDER BY created_at DESC
-    `, [employeeId], (err, leaves) => {
-            if (err) {
-                return res.status(500).json({ error: err.message });
-            }
+        const { data: leaves, error: leavesError } = await supabase
+            .from('leaves')
+            .select('*')
+            .eq('employee_id', employeeId)
+            .order('created_at', { ascending: false });
 
-            res.json({
-                ...employee,
-                used_leaves: employee.total_leaves - employee.available_leaves,
-                leaves: leaves
-            });
+        if (leavesError) throw leavesError;
+
+        res.json({
+            ...employee,
+            used_leaves: employee.total_leaves - employee.available_leaves,
+            leaves: leaves || []
         });
-    });
+    } catch (error) {
+        console.error('Error fetching employee:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Add new employee
-app.post('/api/employees', requireAuth, (req, res) => {
+app.post('/api/employees', requireAuth, async (req, res) => {
     const { name, department, totalLeaves } = req.body;
 
     if (!name || !totalLeaves) {
         return res.status(400).json({ error: 'Name and total leaves are required' });
     }
 
-    const availableLeaves = parseInt(totalLeaves);
+    try {
+        const { data, error } = await supabase
+            .from('employees')
+            .insert([{
+                name,
+                department: department || 'Not Specified',
+                total_leaves: parseInt(totalLeaves),
+                available_leaves: parseInt(totalLeaves)
+            }])
+            .select()
+            .single();
 
-    db.run(
-        "INSERT INTO employees (name, department, total_leaves, available_leaves) VALUES (?, ?, ?, ?)",
-        [name, department || 'Not Specified', parseInt(totalLeaves), availableLeaves],
-        function (err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-            } else {
-                res.json({
-                    id: this.lastID,
-                    name,
-                    department: department || 'Not Specified',
-                    total_leaves: parseInt(totalLeaves),
-                    available_leaves: availableLeaves,
-                    used_leaves: 0,
-                    total_leave_requests: 0
-                });
-            }
-        }
-    );
+        if (error) throw error;
+
+        res.json({
+            ...data,
+            used_leaves: 0,
+            total_leave_requests: 0
+        });
+    } catch (error) {
+        console.error('Error adding employee:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Update employee
-app.put('/api/employees/:id', requireAuth, (req, res) => {
+app.put('/api/employees/:id', requireAuth, async (req, res) => {
     const { name, department, totalLeaves } = req.body;
     const employeeId = req.params.id;
 
@@ -275,115 +327,143 @@ app.put('/api/employees/:id', requireAuth, (req, res) => {
         return res.status(400).json({ error: 'Name and total leaves are required' });
     }
 
-    // Get current employee data to calculate new available leaves
-    db.get("SELECT * FROM employees WHERE id = ?", [employeeId], (err, employee) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        if (!employee) {
+    try {
+        // Get current employee data
+        const { data: currentEmp, error: fetchError } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('id', employeeId)
+            .single();
+
+        if (fetchError) throw fetchError;
+        if (!currentEmp) {
             return res.status(404).json({ error: 'Employee not found' });
         }
 
-        const usedLeaves = employee.total_leaves - employee.available_leaves;
+        const usedLeaves = currentEmp.total_leaves - currentEmp.available_leaves;
         const newAvailableLeaves = parseInt(totalLeaves) - usedLeaves;
 
-        db.run(
-            "UPDATE employees SET name = ?, department = ?, total_leaves = ?, available_leaves = ? WHERE id = ?",
-            [name, department, parseInt(totalLeaves), newAvailableLeaves, employeeId],
-            function (err) {
-                if (err) {
-                    res.status(500).json({ error: err.message });
-                } else {
-                    res.json({
-                        message: 'Employee updated successfully',
-                        id: employeeId,
-                        name,
-                        department,
-                        total_leaves: parseInt(totalLeaves),
-                        available_leaves: newAvailableLeaves
-                    });
-                }
-            }
-        );
-    });
+        const { data, error } = await supabase
+            .from('employees')
+            .update({
+                name,
+                department,
+                total_leaves: parseInt(totalLeaves),
+                available_leaves: newAvailableLeaves
+            })
+            .eq('id', employeeId)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.json({
+            message: 'Employee updated successfully',
+            ...data
+        });
+    } catch (error) {
+        console.error('Error updating employee:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Delete employee
-app.delete('/api/employees/:id', requireAuth, (req, res) => {
+app.delete('/api/employees/:id', requireAuth, async (req, res) => {
     const employeeId = req.params.id;
 
-    // First delete all leaves for this employee
-    db.run("DELETE FROM leaves WHERE employee_id = ?", [employeeId], (err) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        // First delete all leaves for this employee
+        const { error: leavesError } = await supabase
+            .from('leaves')
+            .delete()
+            .eq('employee_id', employeeId);
+
+        if (leavesError) throw leavesError;
 
         // Then delete the employee
-        db.run("DELETE FROM employees WHERE id = ?", [employeeId], function (err) {
-            if (err) {
-                res.status(500).json({ error: err.message });
-            } else if (this.changes === 0) {
-                res.status(404).json({ error: 'Employee not found' });
-            } else {
-                res.json({ message: 'Employee deleted successfully' });
-            }
-        });
-    });
+        const { error: empError } = await supabase
+            .from('employees')
+            .delete()
+            .eq('id', employeeId);
+
+        if (empError) throw empError;
+
+        res.json({ message: 'Employee deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting employee:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // ==================== LEAVE ROUTES ====================
 
 // Get all leaves with employee information
-app.get('/api/leaves', requireAuth, (req, res) => {
-    const query = `
-    SELECT 
-      l.*,
-      e.name as employee_name,
-      e.department as employee_department
-    FROM leaves l
-    JOIN employees e ON l.employee_id = e.id
-    ORDER BY l.created_at DESC
-  `;
+app.get('/api/leaves', requireAuth, async (req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from('leaves')
+            .select(`
+        *,
+        employees:employee_id (
+          name,
+          department
+        )
+      `)
+            .order('created_at', { ascending: false });
 
-    db.all(query, (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-        } else {
-            res.json(rows);
-        }
-    });
+        if (error) throw error;
+
+        // Format the response
+        const formattedLeaves = data.map(leave => ({
+            ...leave,
+            employee_name: leave.employees?.name || 'Unknown',
+            employee_department: leave.employees?.department || 'Not Specified'
+        }));
+
+        res.json(formattedLeaves);
+    } catch (error) {
+        console.error('Error fetching leaves:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Get leaves for specific employee
-app.get('/api/employees/:id/leaves', requireAuth, (req, res) => {
+app.get('/api/employees/:id/leaves', requireAuth, async (req, res) => {
     const employeeId = req.params.id;
 
-    db.all(
-        "SELECT * FROM leaves WHERE employee_id = ? ORDER BY created_at DESC",
-        [employeeId],
-        (err, rows) => {
-            if (err) {
-                res.status(500).json({ error: err.message });
-            } else {
-                res.json(rows);
-            }
-        }
-    );
+    try {
+        const { data, error } = await supabase
+            .from('leaves')
+            .select('*')
+            .eq('employee_id', employeeId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching employee leaves:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Add new leave
-app.post('/api/leaves', requireAuth, (req, res) => {
+app.post('/api/leaves', requireAuth, async (req, res) => {
     const { employeeId, startDate, endDate, reason, status } = req.body;
 
     if (!employeeId || !startDate || !endDate || !reason) {
         return res.status(400).json({ error: 'All fields are required' });
     }
 
-    // Get employee info
-    db.get("SELECT * FROM employees WHERE id = ?", [employeeId], (err, employee) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        // Get employee info
+        const { data: employee, error: empError } = await supabase
+            .from('employees')
+            .select('*')
+            .eq('id', employeeId)
+            .single();
+
+        if (empError) throw empError;
         if (!employee) {
             return res.status(404).json({ error: 'Employee not found' });
         }
@@ -397,7 +477,7 @@ app.post('/api/leaves', requireAuth, (req, res) => {
             return res.status(400).json({ error: 'Invalid date range' });
         }
 
-        // Check if employee has enough available leaves
+        // Check available leaves
         if (days > employee.available_leaves) {
             return res.status(400).json({
                 error: `Insufficient leave balance. Available: ${employee.available_leaves}, Requested: ${days}`
@@ -405,75 +485,134 @@ app.post('/api/leaves', requireAuth, (req, res) => {
         }
 
         // Add leave
-        db.run(
-            "INSERT INTO leaves (employee_id, start_date, end_date, days, reason, status) VALUES (?, ?, ?, ?, ?, ?)",
-            [employeeId, startDate, endDate, days, reason, status || 'approved'],
-            function (err) {
-                if (err) {
-                    return res.status(500).json({ error: err.message });
-                }
+        const { data: leave, error: leaveError } = await supabase
+            .from('leaves')
+            .insert([{
+                employee_id: employeeId,
+                start_date: startDate,
+                end_date: endDate,
+                days,
+                reason,
+                status: status || 'approved'
+            }])
+            .select()
+            .single();
 
-                // Update employee's available leaves
-                db.run(
-                    "UPDATE employees SET available_leaves = available_leaves - ? WHERE id = ?",
-                    [days, employeeId],
-                    (err) => {
-                        if (err) {
-                            return res.status(500).json({ error: err.message });
-                        }
+        if (leaveError) throw leaveError;
 
-                        res.json({
-                            id: this.lastID,
-                            employee_id: parseInt(employeeId),
-                            employee_name: employee.name,
-                            employee_department: employee.department,
-                            start_date: startDate,
-                            end_date: endDate,
-                            days,
-                            reason,
-                            status: status || 'approved',
-                            created_at: new Date().toISOString()
-                        });
-                    }
-                );
-            }
-        );
-    });
+        // Update employee's available leaves
+        const { error: updateError } = await supabase
+            .from('employees')
+            .update({ available_leaves: employee.available_leaves - days })
+            .eq('id', employeeId);
+
+        if (updateError) throw updateError;
+
+        res.json({
+            ...leave,
+            employee_name: employee.name,
+            employee_department: employee.department
+        });
+    } catch (error) {
+        console.error('Error adding leave:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // Delete leave
-app.delete('/api/leaves/:id', requireAuth, (req, res) => {
+app.delete('/api/leaves/:id', requireAuth, async (req, res) => {
     const leaveId = req.params.id;
 
-    // Get leave info first
-    db.get("SELECT * FROM leaves WHERE id = ?", [leaveId], (err, leave) => {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
+    try {
+        // Get leave info
+        const { data: leave, error: leaveError } = await supabase
+            .from('leaves')
+            .select('*')
+            .eq('id', leaveId)
+            .single();
+
+        if (leaveError) throw leaveError;
         if (!leave) {
             return res.status(404).json({ error: 'Leave not found' });
         }
 
         // Delete leave
-        db.run("DELETE FROM leaves WHERE id = ?", [leaveId], function (err) {
-            if (err) {
-                return res.status(500).json({ error: err.message });
+        const { error: deleteError } = await supabase
+            .from('leaves')
+            .delete()
+            .eq('id', leaveId);
+
+        if (deleteError) throw deleteError;
+
+        // Restore employee's available leaves
+        const { error: updateError } = await supabase
+            .from('employees')
+            .update({
+                available_leaves: supabase.raw('available_leaves + ?', [leave.days])
+            })
+            .eq('id', leave.employee_id);
+
+        if (updateError) {
+            // Alternative approach if raw doesn't work
+            const { data: employee, error: fetchError } = await supabase
+                .from('employees')
+                .select('available_leaves')
+                .eq('id', leave.employee_id)
+                .single();
+
+            if (!fetchError && employee) {
+                await supabase
+                    .from('employees')
+                    .update({ available_leaves: employee.available_leaves + leave.days })
+                    .eq('id', leave.employee_id);
             }
+        }
 
-            // Restore employee's available leaves
-            db.run(
-                "UPDATE employees SET available_leaves = available_leaves + ? WHERE id = ?",
-                [leave.days, leave.employee_id],
-                (err) => {
-                    if (err) {
-                        return res.status(500).json({ error: err.message });
-                    }
+        res.json({ message: 'Leave deleted successfully and balance restored' });
+    } catch (error) {
+        console.error('Error deleting leave:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
 
-                    res.json({ message: 'Leave deleted successfully and balance restored' });
-                }
-            );
-        });
-    });
+// ==================== CSV EXPORT ROUTE ====================
+
+// Export employees data to CSV
+app.get('/api/export-csv', requireAuth, async (req, res) => {
+    try {
+        const { data: employees, error } = await supabase
+            .from('employees')
+            .select('*')
+            .order('name');
+
+        if (error) throw error;
+
+        // Prepare CSV data
+        const csvData = employees.map(emp => ({
+            'Employee Name': emp.name,
+            'Department': emp.department || 'Not Specified',
+            'Total Leaves': emp.total_leaves,
+            'Available Leaves': emp.available_leaves,
+            'Used Leaves': emp.total_leaves - emp.available_leaves
+        }));
+
+        // Create workbook and worksheet
+        const ws = XLSX.utils.json_to_sheet(csvData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Employees');
+
+        // Generate CSV buffer
+        const csvBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'csv' });
+
+        // Set headers for download
+        res.setHeader('Content-Disposition', 'attachment; filename=employees_export.csv');
+        res.setHeader('Content-Type', 'text/csv');
+        res.send(csvBuffer);
+
+    } catch (error) {
+        console.error('Error exporting CSV:', error);
+        res.status(500).json({ error: 'Failed to export CSV' });
+    }
 });
 
 // ==================== EXCEL IMPORT ROUTE ====================
@@ -497,13 +636,13 @@ app.get('/api/download-template', requireAuth, (req, res) => {
 });
 
 // Import employees from Excel
-app.post('/api/import-employees', requireAuth, upload.single('excelFile'), (req, res) => {
+app.post('/api/import-employees', requireAuth, upload.single('excelFile'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
 
     try {
-        // Read the uploaded Excel file
+        // Read Excel file
         const workbook = XLSX.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
@@ -516,130 +655,164 @@ app.post('/api/import-employees', requireAuth, upload.single('excelFile'), (req,
             return res.status(400).json({ error: 'Excel file is empty' });
         }
 
-        // Validate required columns
-        const requiredColumns = ['name', 'department', 'total_leaves', 'available_leaves'];
-        const firstRow = data[0];
-        const missingColumns = requiredColumns.filter(col =>
-            !Object.keys(firstRow).some(key => key.toLowerCase().includes(col.toLowerCase()))
-        );
+        // Validate and prepare data
+        const employees = [];
+        const errors = [];
 
-        if (missingColumns.length > 0) {
-            return res.status(400).json({
-                error: `Missing required columns: ${missingColumns.join(', ')}. Required columns: name, department, total_leaves, available_leaves`
-            });
-        }
-
-        let imported = 0;
-        let errors = [];
-
-        // Process each row
-        const processRow = (index) => {
-            if (index >= data.length) {
-                return res.json({
-                    message: `Import completed. ${imported} employees imported successfully.`,
-                    imported,
-                    errors: errors.length > 0 ? errors : undefined
-                });
-            }
-
-            const row = data[index];
+        data.forEach((row, index) => {
             const name = row.name || row.Name || row.NAME;
             const department = row.department || row.Department || row.DEPARTMENT;
             const totalLeaves = parseInt(row.total_leaves || row['total leaves'] || row['Total Leaves'] || row.TOTAL_LEAVES);
             const availableLeaves = parseInt(row.available_leaves || row['available leaves'] || row['Available Leaves'] || row.AVAILABLE_LEAVES);
 
-            // Validate row data
             if (!name || !totalLeaves || isNaN(totalLeaves)) {
                 errors.push(`Row ${index + 2}: Missing or invalid name or total_leaves`);
-                return processRow(index + 1);
+                return;
             }
 
             if (isNaN(availableLeaves) || availableLeaves > totalLeaves) {
                 errors.push(`Row ${index + 2}: Invalid available_leaves (should be <= total_leaves)`);
-                return processRow(index + 1);
+                return;
             }
 
-            // Insert employee
-            db.run(
-                "INSERT INTO employees (name, department, total_leaves, available_leaves) VALUES (?, ?, ?, ?)",
-                [name, department || 'Not Specified', totalLeaves, availableLeaves],
-                function (err) {
-                    if (err) {
-                        errors.push(`Row ${index + 2}: Database error - ${err.message}`);
-                    } else {
-                        imported++;
-                    }
-                    processRow(index + 1);
-                }
-            );
-        };
+            employees.push({
+                name,
+                department: department || 'Not Specified',
+                total_leaves: totalLeaves,
+                available_leaves: availableLeaves
+            });
+        });
 
-        processRow(0);
+        // Insert employees into Supabase
+        let imported = 0;
+        if (employees.length > 0) {
+            const { data, error } = await supabase
+                .from('employees')
+                .insert(employees)
+                .select();
+
+            if (error) {
+                errors.push(`Database error: ${error.message}`);
+            } else {
+                imported = data.length;
+            }
+        }
+
+        res.json({
+            message: `Import completed. ${imported} employees imported successfully.`,
+            imported,
+            errors: errors.length > 0 ? errors : undefined
+        });
 
     } catch (error) {
         // Clean up uploaded file in case of error
         if (req.file && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
+        console.error('Import error:', error);
         res.status(500).json({ error: 'Error processing Excel file: ' + error.message });
     }
 });
 
-// ==================== STATISTICS & REPORTS ====================
+// ==================== DASHBOARD STATISTICS ====================
 
 // Get dashboard statistics
-app.get('/api/dashboard/stats', requireAuth, (req, res) => {
-    const stats = {};
+app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
+    try {
+        // Get total employees
+        const { count: totalEmployees, error: empError } = await supabase
+            .from('employees')
+            .select('*', { count: 'exact', head: true });
 
-    // Get total employees
-    db.get("SELECT COUNT(*) as total FROM employees", (err, result) => {
-        if (err) return res.status(500).json({ error: err.message });
-        stats.totalEmployees = result.total;
+        if (empError) throw empError;
 
-        // Get total leaves taken this year
-        db.get(`
-      SELECT COUNT(*) as total, SUM(days) as totalDays 
-      FROM leaves 
-      WHERE strftime('%Y', created_at) = strftime('%Y', 'now')
-    `, (err, result) => {
-            if (err) return res.status(500).json({ error: err.message });
-            stats.totalLeavesThisYear = result.total || 0;
-            stats.totalDaysThisYear = result.totalDays || 0;
+        // Get total leaves this year
+        const currentYear = new Date().getFullYear();
+        const { data: leavesThisYear, error: leavesError } = await supabase
+            .from('leaves')
+            .select('days')
+            .gte('created_at', `${currentYear}-01-01`)
+            .lte('created_at', `${currentYear}-12-31`);
 
-            // Get department statistics
-            db.all(`
-        SELECT 
-          department,
-          COUNT(*) as employee_count,
-          SUM(total_leaves) as total_leaves,
-          SUM(available_leaves) as available_leaves
-        FROM employees 
-        GROUP BY department
-      `, (err, departments) => {
-                if (err) return res.status(500).json({ error: err.message });
-                stats.departments = departments;
+        if (leavesError) throw leavesError;
 
-                res.json(stats);
-            });
+        const totalLeavesThisYear = leavesThisYear.length;
+        const totalDaysThisYear = leavesThisYear.reduce((sum, leave) => sum + leave.days, 0);
+
+        // Get department statistics
+        const { data: departments, error: deptError } = await supabase
+            .from('employees')
+            .select('department, total_leaves, available_leaves')
+            .order('department');
+
+        if (deptError) throw deptError;
+
+        // Group by department
+        const deptStats = departments.reduce((acc, emp) => {
+            const dept = emp.department || 'Not Specified';
+            if (!acc[dept]) {
+                acc[dept] = {
+                    department: dept,
+                    employee_count: 0,
+                    total_leaves: 0,
+                    available_leaves: 0
+                };
+            }
+            acc[dept].employee_count++;
+            acc[dept].total_leaves += emp.total_leaves;
+            acc[dept].available_leaves += emp.available_leaves;
+            return acc;
+        }, {});
+
+        res.json({
+            totalEmployees,
+            totalLeavesThisYear,
+            totalDaysThisYear,
+            departments: Object.values(deptStats)
         });
-    });
+
+    } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==================== STARTUP ====================
+
+async function initializeApp() {
+    try {
+        console.log('🔗 Connecting to Supabase...');
+
+        // Test Supabase connection
+        const { data, error } = await supabase.from('employees').select('count', { count: 'exact', head: true });
+
+        if (error) {
+            console.error('❌ Supabase connection failed:', error.message);
+            console.log('📋 Make sure to:');
+            console.log('   1. Set SUPABASE_URL environment variable');
+            console.log('   2. Set SUPABASE_ANON_KEY environment variable');
+            console.log('   3. Create the required tables in Supabase');
+        } else {
+            console.log('✅ Supabase connected successfully');
+            console.log(`📊 Found ${data || 0} employees in database`);
+        }
+
+    } catch (error) {
+        console.error('❌ Initialization error:', error);
+    }
+}
+
+// Start server
+app.listen(PORT, () => {
+    console.log(`🚀 HR Leave Management System running on http://localhost:${PORT}`);
+    console.log(`🔐 Login at: http://localhost:${PORT}/login`);
+    console.log(`🏠 Home page: http://localhost:${PORT}/`);
+    console.log(`📊 Port changed to ${PORT} for fresh start`);
+    initializeApp();
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-    console.log('\nShutting down gracefully...');
-    db.close((err) => {
-        if (err) {
-            console.error('Error closing database:', err.message);
-        } else {
-            console.log('Database connection closed.');
-        }
-        process.exit(0);
-    });
-});
-
-app.listen(PORT, () => {
-    console.log(`🚀 HR Leave Management System running on http://localhost:${PORT}`);
-    console.log(`📊 Database: hr_system.db`);
-    console.log(`🔐 Login with - Username: Reyam, Password: SugarHamburger`);
+    console.log('\n🛑 Shutting down gracefully...');
+    process.exit(0);
 });
