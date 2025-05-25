@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+        <%= title %>
+    </title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .navbar-brand {
+            font-weight: 600;
+            font-size: 1.5rem;
+        }
+
+        .welcome-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+
+        .welcome-content {
+            padding: 2rem;
+        }
+
+        .feature-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            border: none;
+            height: 100%;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .icon-employees {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .icon-leaves {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            color: white;
+        }
+
+        .icon-reports {
+            background: linear-gradient(135deg, #4facfe, #00f2fe);
+            color: white;
+        }
+
+        .icon-settings {
+            background: linear-gradient(135deg, #43e97b, #38f9d7);
+            color: white;
+        }
+
+        .stats-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            border: none;
+            padding: 1.5rem;
+            text-align: center;
+            height: 100%;
+        }
+
+        .stats-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .stats-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/dashboard">
+                <i class="fas fa-briefcase me-2"></i>
+                HR Leave Management
+            </a>
+
+            <div class="navbar-nav ms-auto">
+                <div class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <i class="fas fa-user me-1"></i>
+                        <%= user.username %>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item" href="#"><i class="fas fa-user-edit me-2"></i>Profile</a></li>
+                        <li><a class="dropdown-item" href="#"><i class="fas fa-cog me-2"></i>Settings</a></li>
+                        <li>
+                            <hr class="dropdown-divider">
+                        </li>
+                        <li><a class="dropdown-item" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mt-4">
+        <!-- Welcome Section -->
+        <div class="welcome-card">
+            <div class="welcome-content">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h1 class="mb-2">Welcome back, <%= user.username %>!</h1>
+                        <p class="mb-0 opacity-75">
+                            <i class="fas fa-shield-alt me-2"></i>Role: <%= user.role.charAt(0).toUpperCase() +
+                                user.role.slice(1) %>
+                                <span class="ms-3">
+                                    <i class="fas fa-clock me-2"></i>Session expires in 24 hours
+                                </span>
+                        </p>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <i class="fas fa-user-tie" style="font-size: 4rem; opacity: 0.3;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3">
+                <div class="stats-card">
+                    <div class="stats-number text-primary">
+                        <%= stats.totalEmployees %>
+                    </div>
+                    <div class="stats-label">Total Employees</div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stats-card">
+                    <div class="stats-number text-success">
+                        <%= stats.activeLeaves %>
+                    </div>
+                    <div class="stats-label">Active Leaves</div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stats-card">
+                    <div class="stats-number text-warning">
+                        <%= stats.pendingRequests %>
+                    </div>
+                    <div class="stats-label">Pending Requests</div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stats-card">
+                    <div class="stats-number text-info">
+                        <%= stats.thisMonth %>
+                    </div>
+                    <div class="stats-label">This Month</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Feature Cards -->
+        <div class="row">
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card feature-card">
+                    <div class="card-body text-center p-4">
+                        <div class="feature-icon icon-employees mx-auto">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <h5 class="card-title mb-2">Manage Employees</h5>
+                        <p class="card-text text-muted mb-3">Add, edit, and manage employee information and leave
+                            allocations.</p>
+                        <a href="/dashboard/employees" class="btn btn-primary btn-sm">
+                            <i class="fas fa-users me-1"></i>Manage Employees
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card feature-card">
+                    <div class="card-body text-center p-4">
+                        <div class="feature-icon icon-leaves mx-auto">
+                            <i class="fas fa-calendar-alt"></i>
+                        </div>
+                        <h5 class="card-title mb-2">Leave Management</h5>
+                        <p class="card-text text-muted mb-3">Process leave requests, approvals, and track leave
+                            balances.</p>
+                        <button class="btn btn-outline-primary btn-sm" disabled>
+                            <i class="fas fa-calendar-check me-1"></i>Coming Soon
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card feature-card">
+                    <div class="card-body text-center p-4">
+                        <div class="feature-icon icon-reports mx-auto">
+                            <i class="fas fa-chart-bar"></i>
+                        </div>
+                        <h5 class="card-title mb-2">Reports & Analytics</h5>
+                        <p class="card-text text-muted mb-3">Generate detailed reports and analyze leave patterns.</p>
+                        <button class="btn btn-outline-primary btn-sm" disabled>
+                            <i class="fas fa-file-alt me-1"></i>Coming Soon
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-3 col-md-6 mb-4">
+                <div class="card feature-card">
+                    <div class="card-body text-center p-4">
+                        <div class="feature-icon icon-settings mx-auto">
+                            <i class="fas fa-cogs"></i>
+                        </div>
+                        <h5 class="card-title mb-2">System Settings</h5>
+                        <p class="card-text text-muted mb-3">Configure system preferences and user permissions.</p>
+                        <button class="btn btn-outline-primary btn-sm" disabled>
+                            <i class="fas fa-wrench me-1"></i>Coming Soon
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Activity Section -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card feature-card">
+                    <div class="card-header bg-transparent border-0 pt-4 px-4">
+                        <h5 class="mb-0">
+                            <i class="fas fa-history me-2 text-primary"></i>
+                            Recent Activity
+                        </h5>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="text-center text-muted py-4">
+                            <i class="fas fa-inbox fa-3x mb-3 opacity-25"></i>
+                            <p>No recent activity to display.</p>
+                            <small>Activity will appear here once you start managing employees and leaves.</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Display current time
+        function updateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleString();
+            console.log('Current time:', timeString);
+        }
+
+        // Update time every minute
+        setInterval(updateTime, 60000);
+        updateTime();
+
+        // Add some interactivity
+        document.querySelectorAll('.feature-card').forEach(card => {
+            card.addEventListener('mouseenter', function () {
+                this.style.borderLeft = '4px solid #667eea';
+            });
+
+            card.addEventListener('mouseleave', function () {
+                this.style.borderLeft = 'none';
+            });
+        });
+    </script>
+</body>
+
+</html>
