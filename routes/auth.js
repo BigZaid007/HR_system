@@ -1,5 +1,4 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
 const supabase = require('../config/supabase');
 
 const router = express.Router();
