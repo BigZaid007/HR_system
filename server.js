@@ -10,9 +10,23 @@ const uploadRoutes = require('./routes/upload');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(express.json({ charset: 'utf-8' }));
-app.use(express.urlencoded({ extended: true, charset: 'utf-8' }));
+// Set charset for proper Arabic encoding
+app.use((req, res, next) => {
+    res.charset = 'utf-8';
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    next();
+});
+
+// Middleware with proper encoding
+app.use(express.json({
+    charset: 'utf-8',
+    limit: '10mb'
+}));
+app.use(express.urlencoded({
+    extended: true,
+    charset: 'utf-8',
+    limit: '10mb'
+}));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Session configuration

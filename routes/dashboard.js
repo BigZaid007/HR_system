@@ -250,101 +250,6 @@ router.post('/add-leave', async (req, res) => {
     }
 });
 
-// GET /dashboard/download-template - Download employee import template
-router.get('/download-template', (req, res) => {
-    const csvContent = 'name,department,total_leaves,available_leaves\n' +
-        'أحمد محمد,تقنية المعلومات,25,25\n' +
-        'فاطمة علي,الموارد البشرية,30,30\n' +
-        'John Smith,Finance,25,25\n' +
-        'سارة أحمد,التسويق,28,28';
-
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=employee_import_template.csv');
-    res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
-});
-
-// GET /dashboard/export-employees - Export employees to Excel
-router.get('/export-employees', async (req, res) => {
-    try {
-        const { data: employees, error } = await supabase
-            .from('employees')
-            .select('*')
-            .order('name', { ascending: true });
-
-        if (error) {
-            return res.status(500).json({ error: 'Error fetching employees' });
-        }
-
-        // Convert to CSV format with proper UTF-8 encoding
-        let csvContent = 'Name,Department,Total Leaves,Available Leaves,Used Leaves\n';
-        employees.forEach(emp => {
-            const usedLeaves = emp.total_leaves - emp.available_leaves;
-            csvContent += `"${emp.name}","${emp.department}",${emp.total_leaves},${emp.available_leaves},${usedLeaves}\n`;
-        });
-
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename=employees_export.csv');
-        res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
-
-    } catch (error) {
-        console.error('Export error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// POST /dashboard/import-employees - Import employees from file
-router.post('/import-employees', async (req, res) => {
-    try {
-        const { employees } = req.body;
-
-        if (!employees || !Array.isArray(employees)) {
-            return res.status(400).json({ error: 'Invalid employee data' });
-        }
-
-        // Validate required fields
-        const requiredFields = ['name', 'department', 'total_leaves', 'available_leaves'];
-        const validEmployees = [];
-
-        for (const emp of employees) {
-            const missing = requiredFields.filter(field => !emp[field]);
-            if (missing.length === 0) {
-                validEmployees.push({
-                    name: emp.name.trim(),
-                    department: emp.department.trim(),
-                    total_leaves: parseInt(emp.total_leaves),
-                    available_leaves: parseInt(emp.available_leaves)
-                });
-            }
-        }
-
-        if (validEmployees.length === 0) {
-            return res.status(400).json({ error: 'No valid employee records found' });
-        }
-
-        // Insert employees into database
-        const { data: insertedEmployees, error } = await supabase
-            .from('employees')
-            .insert(validEmployees)
-            .select();
-
-        if (error) {
-            console.error('Error importing employees:', error);
-            return res.status(500).json({ error: 'Error importing employees' });
-        }
-
-        res.json({
-            success: true,
-            message: `Successfully imported ${insertedEmployees.length} employees`,
-            imported: insertedEmployees.length,
-            skipped: employees.length - validEmployees.length
-        });
-
-    } catch (error) {
-        console.error('Import error:', error);
-        res.status(500).json({ error: 'Server error during import' });
-    }
-});
-
 // DELETE /dashboard/employee/:id - Delete employee
 router.delete('/employee/:id', async (req, res) => {
     try {
@@ -429,6 +334,48 @@ router.get('/leave-reasons', async (req, res) => {
 
     } catch (error) {
         console.error('Leave reasons error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// GET /dashboard/download-template - Download employee import template
+router.get('/download-template', (req, res) => {
+    const csvContent = 'name,department,total_leaves,available_leaves\n' +
+        'أحمد محمد,تقنية المعلومات,25,25\n' +
+        'فاطمة علي,الموارد البشرية,30,30\n' +
+        'John Smith,Finance,25,25\n' +
+        'سارة أحمد,التسويق,28,28';
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=employee_import_template.csv');
+    res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
+});
+
+// GET /dashboard/export-employees - Export employees to Excel
+router.get('/export-employees', async (req, res) => {
+    try {
+        const { data: employees, error } = await supabase
+            .from('employees')
+            .select('*')
+            .order('name', { ascending: true });
+
+        if (error) {
+            return res.status(500).json({ error: 'Error fetching employees' });
+        }
+
+        // Convert to CSV format with proper UTF-8 encoding
+        let csvContent = 'Name,Department,Total Leaves,Available Leaves,Used Leaves\n';
+        employees.forEach(emp => {
+            const usedLeaves = emp.total_leaves - emp.available_leaves;
+            csvContent += `"${emp.name}","${emp.department}",${emp.total_leaves},${emp.available_leaves},${usedLeaves}\n`;
+        });
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=employees_export.csv');
+        res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
+
+    } catch (error) {
+        console.error('Export error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 });

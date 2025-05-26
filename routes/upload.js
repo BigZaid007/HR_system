@@ -83,7 +83,8 @@ router.post('/employees', requireAuth, upload.single('employeeFile'), async (req
                 message: `Successfully imported ${result.imported} employees`,
                 imported: result.imported,
                 skipped: result.skipped,
-                errors: result.errors
+                errors: result.errors,
+                duplicates: result.duplicates
             });
 
         } catch (processingError) {
@@ -100,48 +101,95 @@ router.post('/employees', requireAuth, upload.single('employeeFile'), async (req
     }
 });
 
-// Process CSV file
+// Process CSV file with proper UTF-8 encoding
 function processCSV(filePath) {
     return new Promise((resolve, reject) => {
         const employees = [];
 
-        fs.createReadStream(filePath, 'utf8')
+        // Read file with UTF-8 encoding and detect BOM
+        let fileContent = fs.readFileSync(filePath, 'utf8');
+
+        // Remove BOM if present
+        if (fileContent.charCodeAt(0) === 0xFEFF) {
+            fileContent = fileContent.slice(1);
+        }
+
+        // Write cleaned content back to temporary file
+        const tempPath = filePath + '.temp';
+        fs.writeFileSync(tempPath, fileContent, 'utf8');
+
+        fs.createReadStream(tempPath, { encoding: 'utf8' })
             .pipe(csv({
                 skipEmptyLines: true,
-                headers: ['name', 'department', 'total_leaves', 'available_leaves'],
-                renameHeaders: true
+                skipLinesWithError: true
             }))
             .on('data', (data) => {
-                employees.push(data);
+                // Clean up any encoding issues
+                const cleanData = {};
+                Object.keys(data).forEach(key => {
+                    const cleanKey = key.trim();
+                    const cleanValue = data[key] ? data[key].toString().trim() : '';
+                    cleanData[cleanKey] = cleanValue;
+                });
+                employees.push(cleanData);
             })
             .on('end', () => {
+                // Clean up temp file
+                if (fs.existsSync(tempPath)) {
+                    fs.unlinkSync(tempPath);
+                }
                 resolve(employees);
             })
             .on('error', (error) => {
+                // Clean up temp file
+                if (fs.existsSync(tempPath)) {
+                    fs.unlinkSync(tempPath);
+                }
                 reject(error);
             });
     });
 }
 
-// Process Excel file
+// Process Excel file with proper encoding
 function processExcel(filePath) {
     return new Promise((resolve, reject) => {
         try {
-            const workbook = xlsx.readFile(filePath);
+            const workbook = xlsx.readFile(filePath, {
+                type: 'file',
+                codepage: 65001, // UTF-8
+                cellText: true,
+                cellDates: true
+            });
+
             const sheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[sheetName];
 
-            // Convert to JSON
-            const employees = xlsx.utils.sheet_to_json(worksheet);
+            // Convert to JSON with proper encoding
+            const employees = xlsx.utils.sheet_to_json(worksheet, {
+                defval: '',
+                blankrows: false,
+                raw: false // This ensures text is properly formatted
+            });
 
-            resolve(employees);
+            // Clean up the data
+            const cleanedEmployees = employees.map(emp => {
+                const cleanData = {};
+                Object.keys(emp).forEach(key => {
+                    const cleanKey = key.trim();
+                    const cleanValue = emp[key] ? emp[key].toString().trim() : '';
+                    cleanData[cleanKey] = cleanValue;
+                });
+                return cleanData;
+            });
+
+            resolve(cleanedEmployees);
         } catch (error) {
             reject(error);
         }
     });
 }
 
-// Insert employees into database
+// Insert employees into database with duplicate checking
 async function insertEmployees(employeesData) {
     const requiredFields = ['name', 'department', 'total_leaves', 'available_leaves'];
     const validEmployees = [];
@@ -182,11 +230,18 @@ async function insertEmployees(employeesData) {
                 continue;
             }
 
-            // Clean and validate data
+            // Clean and validate data - ensure proper UTF-8 handling
             const cleanName = emp.name.toString().trim();
             const cleanDepartment = emp.department.toString().trim();
             const totalLeaves = parseInt(emp.total_leaves);
             const availableLeaves = parseInt(emp.available_leaves);
+
+            // Validate name and department are not empty after cleaning
+            if (!cleanName || !cleanDepartment) {
+                errors.push(`Row ${rowNum}: Name and department cannot be empty`);
+                skipped++;
+                continue;
+            }
 
             // Validate data types
             if (isNaN(totalLeaves) || isNaN(availableLeaves)) {
