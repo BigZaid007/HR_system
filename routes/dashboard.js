@@ -253,13 +253,14 @@ router.post('/add-leave', async (req, res) => {
 // GET /dashboard/download-template - Download employee import template
 router.get('/download-template', (req, res) => {
     const csvContent = 'name,department,total_leaves,available_leaves\n' +
-        'John Doe,IT,25,25\n' +
-        'Jane Smith,HR,30,30\n' +
-        'Mike Johnson,Finance,25,25';
+        'أحمد محمد,تقنية المعلومات,25,25\n' +
+        'فاطمة علي,الموارد البشرية,30,30\n' +
+        'John Smith,Finance,25,25\n' +
+        'سارة أحمد,التسويق,28,28';
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=employee_import_template.csv');
-    res.send(csvContent);
+    res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
 });
 
 // GET /dashboard/export-employees - Export employees to Excel
@@ -274,16 +275,16 @@ router.get('/export-employees', async (req, res) => {
             return res.status(500).json({ error: 'Error fetching employees' });
         }
 
-        // Convert to CSV format
+        // Convert to CSV format with proper UTF-8 encoding
         let csvContent = 'Name,Department,Total Leaves,Available Leaves,Used Leaves\n';
         employees.forEach(emp => {
             const usedLeaves = emp.total_leaves - emp.available_leaves;
             csvContent += `"${emp.name}","${emp.department}",${emp.total_leaves},${emp.available_leaves},${usedLeaves}\n`;
         });
 
-        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename=employees_export.csv');
-        res.send(csvContent);
+        res.send('\uFEFF' + csvContent); // Add BOM for proper UTF-8 encoding
 
     } catch (error) {
         console.error('Export error:', error);

@@ -105,8 +105,12 @@ function processCSV(filePath) {
     return new Promise((resolve, reject) => {
         const employees = [];
 
-        fs.createReadStream(filePath)
-            .pipe(csv())
+        fs.createReadStream(filePath, 'utf8')
+            .pipe(csv({
+                skipEmptyLines: true,
+                headers: ['name', 'department', 'total_leaves', 'available_leaves'],
+                renameHeaders: true
+            }))
             .on('data', (data) => {
                 employees.push(data);
             })
@@ -142,7 +146,24 @@ async function insertEmployees(employeesData) {
     const requiredFields = ['name', 'department', 'total_leaves', 'available_leaves'];
     const validEmployees = [];
     const errors = [];
+    const duplicates = [];
     let skipped = 0;
+
+    // Get existing employees to check for duplicates
+    const { data: existingEmployees, error: fetchError } = await supabase
+        .from('employees')
+        .select('name, department');
+
+    if (fetchError) {
+        throw new Error(`Error fetching existing employees: ${fetchError.message}`);
+    }
+
+    // Create a Set for faster duplicate checking (name + department combination)
+    const existingEmployeesSet = new Set(
+        existingEmployees.map(emp =>
+            `${emp.name.toLowerCase().trim()}|${emp.department.toLowerCase().trim()}`
+        )
+    );
 
     for (let i = 0; i < employeesData.length; i++) {
         const emp = employeesData[i];
@@ -161,10 +182,13 @@ async function insertEmployees(employeesData) {
                 continue;
             }
 
-            // Validate and convert data types
+            // Clean and validate data
+            const cleanName = emp.name.toString().trim();
+            const cleanDepartment = emp.department.toString().trim();
             const totalLeaves = parseInt(emp.total_leaves);
             const availableLeaves = parseInt(emp.available_leaves);
 
+            // Validate data types
             if (isNaN(totalLeaves) || isNaN(availableLeaves)) {
                 errors.push(`Row ${rowNum}: Invalid number format for leave values`);
                 skipped++;
@@ -172,14 +196,33 @@ async function insertEmployees(employeesData) {
             }
 
             if (availableLeaves > totalLeaves) {
-                errors.push(`Row ${rowNum}: Available leaves cannot exceed total leaves`);
+                errors.push(`Row ${rowNum}: Available leaves (${availableLeaves}) cannot exceed total leaves (${totalLeaves})`);
                 skipped++;
                 continue;
             }
 
+            if (totalLeaves < 0 || availableLeaves < 0) {
+                errors.push(`Row ${rowNum}: Leave values cannot be negative`);
+                skipped++;
+                continue;
+            }
+
+            // Check for duplicates (name + department combination)
+            const employeeKey = `${cleanName.toLowerCase()}|${cleanDepartment.toLowerCase()}`;
+
+            if (existingEmployeesSet.has(employeeKey)) {
+                duplicates.push(`${cleanName} (${cleanDepartment})`);
+                errors.push(`Row ${rowNum}: Employee "${cleanName}" in department "${cleanDepartment}" already exists`);
+                skipped++;
+                continue;
+            }
+
+            // Add to existing set to prevent duplicates within the import file itself
+            existingEmployeesSet.add(employeeKey);
+
             validEmployees.push({
-                name: emp.name.toString().trim(),
-                department: emp.department.toString().trim(),
+                name: cleanName,
+                department: cleanDepartment,
                 total_leaves: totalLeaves,
                 available_leaves: availableLeaves
             });
@@ -194,16 +237,26 @@ async function insertEmployees(employeesData) {
 
     if (validEmployees.length > 0) {
         try {
-            const { data: insertedEmployees, error } = await supabase
-                .from('employees')
-                .insert(validEmployees)
-                .select();
+            // Insert employees in batches to avoid timeout
+            const batchSize = 50;
+            let allInsertedEmployees = [];
 
-            if (error) {
-                throw new Error(`Database error: ${error.message}`);
+            for (let i = 0; i < validEmployees.length; i += batchSize) {
+                const batch = validEmployees.slice(i, i + batchSize);
+
+                const { data: insertedEmployees, error } = await supabase
+                    .from('employees')
+                    .insert(batch)
+                    .select();
+
+                if (error) {
+                    throw new Error(`Database error: ${error.message}`);
+                }
+
+                allInsertedEmployees = allInsertedEmployees.concat(insertedEmployees);
             }
 
-            imported = insertedEmployees.length;
+            imported = allInsertedEmployees.length;
         } catch (dbError) {
             errors.push(`Database error: ${dbError.message}`);
         }
@@ -212,7 +265,8 @@ async function insertEmployees(employeesData) {
     return {
         imported,
         skipped,
-        errors
+        errors,
+        duplicates: duplicates.length > 0 ? duplicates : null
     };
 }
 
